@@ -69,3 +69,6 @@ backend/models/reranker/
 frontend/tsconfig.tsbuildinfo
 frontend/playwright-report/
 frontend/playwright-results.json
+
+# Redis runtime dump — may contain session tokens, never commit
+data/redis_data/
