@@ -1,31 +1,15 @@
 """
 Response Formatter, Reformatter, and Query Refiner
-Uses Google Gemini (google-genai SDK, new API)
+Uses AWS Bedrock (Claude via Converse API).
 """
 
 import logging
 from typing import Optional
 
-from google import genai
 from config import settings
+from llm.bedrock import bedrock_generate
 
 logger = logging.getLogger(__name__)
-
-# ------------------------------------------------------------------
-# Gemini Client Singleton
-# ------------------------------------------------------------------
-
-_gemini_client = None
-
-
-def get_gemini_client():
-    global _gemini_client
-    if _gemini_client is None:
-        if not settings.GEMINI_API_KEY:
-            raise RuntimeError("GEMINI_API_KEY is not set")
-        _gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        logger.info("Gemini client initialized")
-    return _gemini_client
 
 
 # ------------------------------------------------------------------
@@ -34,10 +18,8 @@ def get_gemini_client():
 
 class ResponseFormatter:
     def __init__(self):
-        self.client = get_gemini_client()
-        self.model = self.client.models.get(settings.GEMINI_MODEL)
         self.available = True
-        logger.info("ResponseFormatter ready")
+        logger.info("ResponseFormatter ready (Bedrock)")
 
     async def reformulate_response(
         self,
@@ -73,10 +55,12 @@ Rules:
 """
 
         try:
-            response = self.model.generate_content(prompt)
+            response = bedrock_generate(
+                prompt, model=settings.GEMINI_MODEL,
+                temperature=settings.RESPONSE_TEMPERATURE, max_tokens=settings.RESPONSE_MAX_TOKENS)
             return response.text.strip()
         except Exception:
-            logger.exception("Gemini formatter failed")
+            logger.exception("Bedrock formatter failed")
             raise RuntimeError("LLM formatter unavailable")
 
 
@@ -86,23 +70,9 @@ Rules:
 
 class ResponseReformatter:
     def __init__(self, api_key: str | None = None):
-        self.available = False
-        self.client = None
-
-        if not api_key:
-            logger.warning("ResponseReformatter disabled (no GEMINI_API_KEY)")
-            return
-
-        try:
-            from google import genai
-
-            self.client = genai.Client(api_key=api_key)
-            self.available = True
-            logger.info("✅ ResponseReformatter ready with Gemini")
-
-        except Exception as e:
-            self.available = False
-            logger.error(f"❌ ResponseReformatter init failed: {e}")
+        # api_key retained for signature compatibility; Bedrock uses IAM auth.
+        self.available = True
+        logger.info("✅ ResponseReformatter ready (Bedrock)")
 
     async def reformulate_response(
         self,
@@ -135,10 +105,9 @@ Do not repeat verses verbatim unless necessary.
 """
 
         try:
-            response = self.client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-            )
+            response = bedrock_generate(
+                prompt, model=settings.GEMINI_MODEL,
+                temperature=settings.RESPONSE_TEMPERATURE, max_tokens=settings.RESPONSE_MAX_TOKENS)
             return response.text.strip()
         except Exception:
             return original_response
@@ -150,27 +119,9 @@ Do not repeat verses verbatim unless necessary.
 
 class QueryRefiner:
     def __init__(self, api_key: str | None = None):
-        self.available = False
-        self.client = None
-        self.model = None
-
-        if not api_key:
-            logger.warning("QueryRefiner disabled (no GEMINI_API_KEY)")
-            return
-
-        try:
-            from google import genai
-
-            self.client = genai.Client(api_key=api_key)
-            self.model = self.client.models.get(
-                model=settings.GEMINI_MODEL
-            )
-            self.available = True
-            logger.info("✅ QueryRefiner ready with Gemini")
-
-        except Exception as e:
-            self.available = False
-            logger.error(f"❌ QueryRefiner init failed: {e}")
+        # api_key retained for signature compatibility; Bedrock uses IAM auth.
+        self.available = True
+        logger.info("✅ QueryRefiner ready (Bedrock)")
 
     async def refine_query(self, query: str, language: str = "en") -> str:
         if not self.available or len(query.split()) < 3:
@@ -187,10 +138,10 @@ Return only 3–6 keyword phrase.
 """
 
         try:
-            response = self.client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-            )
+            response = bedrock_generate(
+                prompt, model=settings.GEMINI_FAST_MODEL,
+                temperature=settings.QUERY_REFINE_TEMPERATURE if hasattr(settings, "QUERY_REFINE_TEMPERATURE") else 0.1,
+                max_tokens=64)
             return response.text.strip()
         except Exception:
             return query

@@ -34,7 +34,7 @@ steps:
       - 'asia-south1-docker.pkg.dev/ionetra/ionetra-docker/backend:${_TAG}'
 
 substitutions:
-  _TAG: 'v3.6'
+  _TAG: 'v3.9'
 
 # Tell Cloud Build to record the produced image
 images:

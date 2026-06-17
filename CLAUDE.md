@@ -1,9 +1,9 @@
 # 3ioNetra — Spiritual Companion
 
-Production AI spiritual companion rooted in Sanatan Dharma. Users converse with "Mitra" (a warm spiritual friend) who listens empathetically, then guides with scriptures, mantras, practices, and product recommendations.
+Production AI spiritual companion rooted in Sanatan Dharma. Users converse with "Mitra" (a warm spiritual friend) who listens empathetically, then guides with scriptures, mantras, and practices.
 
 **Stack:** FastAPI (Python 3.11) + Next.js (TypeScript) + MongoDB + Redis + Qdrant (optional) + Google Gemini 2.5 Pro
-**Version:** 1.1.3
+**Version:** 1.1.4
 **Live:** https://ionetra-frontend-688398835360.asia-south1.run.app | https://3io-netra.vercel.app
 
 ---
@@ -131,6 +131,7 @@ Core orchestrator. Entry point: `process_message(session, message)` and `generat
 - Determines readiness for wisdom (intent-based or signal-threshold)
 - Handles greeting, panchang, product search, closure as special intents
 - Returns: `(response, is_ready_for_wisdom, context_docs, topics, products, phase)`
+- **Product recommendations DISABLED (May 2026):** Both call sites (`guidance` path and `listening` path) are commented out. `products` always returns `[]`. `ProductService` class is intact but not called. Do not re-enable without explicit instruction.
 
 ### IntentAgent (`services/intent_agent.py`)
 LLM-based classifier returning 9-field JSON:
@@ -325,12 +326,13 @@ python scripts/ingest_all_data.py   # Processes all files in data/raw/
 
 Next.js app with Tailwind CSS. Key structure:
 
-- `pages/index.tsx` — Main chat interface: message list, input, product cards, phase indicator, conversation history sidebar
-- `components/LoginPage.tsx` — Registration and login forms
+- `pages/index.tsx` — Main chat interface: message list, input, phase indicator, conversation history sidebar; sticky header shows BETA badge next to app name (May 2026)
+- `components/LoginPage.tsx` — Registration and login forms; registration CTA branded as "Know Your Bhakt" (not "Create Account") in all 3 touchpoints (May 2026)
 - `components/PhaseIndicator.tsx` — Shows current conversation phase
 - `components/TTSButton.tsx` — Audio playback of bot responses
 - `hooks/useSession.ts` — Session management, API calls, SSE streaming
 - `hooks/useAuth.ts` — Auth state, token storage (localStorage)
+- `next.config.js` — CSP allows `http://localhost:8080` in `NODE_ENV=development` only; production CSP is strict (May 2026 fix for local dev login)
 
 ---
 
@@ -386,6 +388,9 @@ All settings in `backend/config.py` via `pydantic-settings`. Key env vars:
 - Never force spirituality — read the room
 - When rejected, pivot to alternative (don't just empathize)
 - Domain compass: 20 life domains mapped to specific dharmic concepts, mantras, and anchors
+- **Product queries (May 2026):** When user wants to acquire a spiritual item (murti, rudraksha, mala, yantra, etc.), treat it as a spiritual question — respond with the item's significance, deity connection, mantra, consecration method, and placement. Never give prices or store names.
+- **PRICE RULE:** If asked how much something costs, give no price (not even approximate). Redirect to intention: "What matters more is the intention you bring to it."
+- **WHERE-TO-BUY RULE:** If asked where to buy online, suggest a local temple shop or spiritual store in their city instead. Pivot to spiritual preparation, not shopping logistics.
 
 ---
 
@@ -419,6 +424,6 @@ python scripts/verify_video_ingestion.py        # Video ingestion verification
 2. **Restricted markdown in LLM responses.** Default is flowing sentences. Allowed: `**bold**` (sparing — 1-2 per response, for deity names or key practices), `- ` bullet lists (2-5 items max, for short step sequences only), `---` horizontal rules (at most one per response, for a real subject change). Forbidden: `# headers`, `> blockquotes`, `*italic*`, `` `inline code` ``, `1. numbered lists`, tables, links. The persona is a warm friend, not an article writer. (Apr 2026 — was previously "no markdown".)
 3. **Verse format:** `[VERSE]...[/VERSE]` tags for original Sanskrit/Hindi only. Max one per response.
 4. **Safety protocol:** Crisis → direct compassion + helpline numbers (iCall, Vandrevala, NIMHANS). Never spiritual-reframe active danger.
-5. **Product recommendations:** NEVER mention products, shopping, URLs, or "my3ionetra.com" in LLM text response. Product cards are shown separately by the frontend.
+5. **Product recommendations DISABLED (May 2026):** Both call sites in `companion_engine.py` are commented out — `products` always returns `[]`. Do not re-enable without explicit instruction. LLM text must never mention products, prices, URLs, or store names. Product-seeking queries are answered as spiritual guidance (significance, mantra, consecration) with no price or purchase information.
 6. **No hollow phrases:** Never say "I hear you", "I understand", "It sounds like", "everything happens for a reason". Never attribute suffering to "past life karma". Never say "just be positive" or "others have it worse".
 7. **Pivot on rejection:** If user rejects a suggestion, immediately offer an alternative spiritual path — never just empathize and back off.

@@ -21,11 +21,22 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False, env="DEBUG")
 
     # ------------------------------------------------------------------
-    # LLM Settings
+    # LLM Settings (AWS Bedrock — Claude)
     # ------------------------------------------------------------------
-    GEMINI_MODEL: str = Field(default="gemini-2.0-flash", env="GEMINI_MODEL")  # Main responses — no thinking, proven quality
-    GEMINI_FAST_MODEL: str = Field(default="gemini-2.5-flash-lite", env="GEMINI_FAST_MODEL")  # Intent classification — 30% faster
-    GEMINI_CACHE_TTL: int = Field(default=21600, env="GEMINI_CACHE_TTL")  # 6 hours — context caching for system instruction
+    # NOTE: The LLM moved from Google Gemini to AWS Bedrock. The *_MODEL fields
+    # below are plain Bedrock model/inference-profile id strings consumed by the
+    # bedrock helper — the GEMINI_* names are retained only to avoid touching the
+    # ~12 call sites that already read them. Override per-env via the same keys.
+    # Defaults target ap-south-1; ENABLE MODEL ACCESS in the Bedrock console.
+    # Region: ap-south-1 (Mumbai) — lowest latency for Indian users.
+    # apac-regional profiles only offer legacy Sonnet 4 / Haiku 3, so the live
+    # Claude models use `global.*` inference profiles (callable from Mumbai,
+    # routed to nearest active region). Nova uses the apac-regional profile.
+    BEDROCK_REGION: str = Field(default="ap-south-1", env="BEDROCK_REGION")
+    GEMINI_MODEL: str = Field(default="global.anthropic.claude-sonnet-4-6", env="GEMINI_MODEL")  # Main responses + vision/OCR — latest Sonnet (best output/latency balance)
+    GEMINI_FAST_MODEL: str = Field(default="global.anthropic.claude-haiku-4-5-20251001-v1:0", env="GEMINI_FAST_MODEL")  # Intent, query expansion, quick tasks
+    BEDROCK_VIDEO_MODEL: str = Field(default="apac.amazon.nova-pro-v1:0", env="BEDROCK_VIDEO_MODEL")  # Video ingestion (Claude has no video)
+    GEMINI_CACHE_TTL: int = Field(default=0, env="GEMINI_CACHE_TTL")  # Disabled — no Bedrock equivalent of Gemini explicit context cache
 
     # Per-task LLM temperatures
     RESPONSE_TEMPERATURE: float = 0.7
@@ -172,7 +183,7 @@ class Settings(BaseSettings):
 
     REFLECTION_THRESHOLD: int = 30                     # importance sum that triggers consolidation
     REFLECTION_EPISODIC_WINDOW: int = 20               # how many recent memories reflection reads
-    REFLECTION_MODEL: str = "gemini-2.5-flash"         # reflection uses slightly stronger model than extraction
+    REFLECTION_MODEL: str = "global.anthropic.claude-haiku-4-5-20251001-v1:0"  # Bedrock id — reflection/consolidation
     BACKFILL_CONVERSATION_COUNT: int = 10              # how many prior conversations cold-start backfill processes
 
     # Semantic Response Cache (saves 5-15s on repeat patterns)
@@ -217,15 +228,15 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     MIN_SIGNALS_THRESHOLD: int = 2
     MIN_CLARIFICATION_TURNS: int = 1
-    MAX_CLARIFICATION_TURNS: int = 4
+    MAX_CLARIFICATION_TURNS: int = 2
     SESSION_TTL_MINUTES: int = 120  # 2hr — prevents mid-conversation expiry on user pauses
     READINESS_POST_GUIDANCE: float = 0.3   # readiness reset after guidance phase
 
     # FSM thresholds — promoted from conversation_fsm.py module constants so
     # the FSM has a single source of truth and these are tunable without code
     # changes. Used by ConversationFSM transition prerequisites.
-    MIN_DISTRESS_LISTEN_TURNS: int = 2          # turns to stay in LISTENING when latest signal severity is HIGH
-    GUIDANCE_OSCILLATION_COOLDOWN: int = 3      # turns required between successive GUIDANCE phases
+    MIN_DISTRESS_LISTEN_TURNS: int = 1          # turns to stay in LISTENING when latest signal severity is HIGH
+    GUIDANCE_OSCILLATION_COOLDOWN: int = 0      # turns required between successive GUIDANCE phases
     EMOTIONAL_SEVERITIES_REQUIRE_LISTEN: str = "high,severe,crisis"  # comma-separated severity names that block early guidance
 
     # ------------------------------------------------------------------
@@ -335,9 +346,9 @@ class Settings(BaseSettings):
     # Model Routing Settings
     # ------------------------------------------------------------------
     MODEL_ROUTING_ENABLED: bool = Field(default=True, env="MODEL_ROUTING_ENABLED")
-    MODEL_ECONOMY: str = "gemini-2.5-flash"
-    MODEL_STANDARD: str = "gemini-2.5-flash"
-    MODEL_PREMIUM: str = "gemini-2.5-pro"
+    MODEL_ECONOMY: str = "global.anthropic.claude-haiku-4-5-20251001-v1:0"   # Bedrock ids
+    MODEL_STANDARD: str = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    MODEL_PREMIUM: str = "global.anthropic.claude-sonnet-4-6"
     MODEL_COST_TRACKING_ENABLED: bool = Field(default=False, env="MODEL_COST_TRACKING_ENABLED")
 
     # ------------------------------------------------------------------

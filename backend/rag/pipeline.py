@@ -14,6 +14,7 @@ import numpy as np
 
 from config import settings
 from constants import TRIVIAL_MESSAGES
+from llm.bedrock import bedrock_generate
 from llm.service import get_llm_service
 from models.session import IntentType
 from rag.scoring_utils import get_doc_score
@@ -764,10 +765,9 @@ class RAGPipeline:
         prompt = f'Translate this Hindi/Hinglish spiritual query to English. Return ONLY the English translation.\nQuery: "{_sanitize_for_prompt(query)}"'
         try:
             def _sync():
-                return self._llm.client.models.generate_content(
-                    model=settings.GEMINI_FAST_MODEL, contents=prompt,
-                    config={"temperature": settings.QUERY_TRANSLATE_TEMPERATURE, "max_output_tokens": 100,
-                            "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True)})
+                return bedrock_generate(
+                    prompt, model=settings.GEMINI_FAST_MODEL,
+                    temperature=settings.QUERY_TRANSLATE_TEMPERATURE, max_tokens=100)
             response = await asyncio.to_thread(_sync)
             translation = (response.text or "").strip()
             if translation:
@@ -817,12 +817,9 @@ Respond ONLY with 2 terms, separated by a newline."""
         try:
             # Use the fast model for query expansion (lightweight task)
             def _sync_expand():
-                return self._llm.client.models.generate_content(
-                    model=settings.GEMINI_FAST_MODEL,
-                    contents=prompt,
-                    config={"temperature": settings.QUERY_EXPAND_TEMPERATURE, "max_output_tokens": 100,
-                            "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True)}
-                )
+                return bedrock_generate(
+                    prompt, model=settings.GEMINI_FAST_MODEL,
+                    temperature=settings.QUERY_EXPAND_TEMPERATURE, max_tokens=100)
 
             response = await asyncio.to_thread(_sync_expand)
             expansion = response.text if response.text else ""
@@ -860,10 +857,9 @@ Respond ONLY with 2 terms, separated by a newline."""
         )
         try:
             def _sync():
-                return self._llm.client.models.generate_content(
-                    model=settings.GEMINI_FAST_MODEL, contents=prompt,
-                    config={"temperature": settings.QUERY_SUMMARIZE_TEMPERATURE, "max_output_tokens": 50,
-                            "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True)})
+                return bedrock_generate(
+                    prompt, model=settings.GEMINI_FAST_MODEL,
+                    temperature=settings.QUERY_SUMMARIZE_TEMPERATURE, max_tokens=50)
             response = await asyncio.to_thread(_sync)
             summary = (response.text or "").strip()
             if summary and len(summary.split()) <= 20:
@@ -931,10 +927,9 @@ Respond ONLY with 2 terms, separated by a newline."""
             try:
                 _t_hyde_llm = time.perf_counter()
                 def _sync():
-                    return self._llm.client.models.generate_content(
-                        model=settings.GEMINI_FAST_MODEL, contents=prompt,
-                        config={"temperature": settings.HYDE_TEMPERATURE, "max_output_tokens": 500,
-                                "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True)})
+                    return bedrock_generate(
+                        prompt, model=settings.GEMINI_FAST_MODEL,
+                        temperature=settings.HYDE_TEMPERATURE, max_tokens=500)
                 response = await asyncio.to_thread(_sync)
                 _hyde_llm_ms = (time.perf_counter() - _t_hyde_llm) * 1000
                 logger.info(f"PERF_HYDE gemini_call={_hyde_llm_ms:.0f}ms")

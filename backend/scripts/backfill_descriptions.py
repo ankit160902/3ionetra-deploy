@@ -40,7 +40,7 @@ def generate_description(name: str, category: str, amount: float, currency: str 
             f"Do NOT use markdown. Plain flowing sentences only. Max 60 words."
         )
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=prompt,
         )
         return response.text.strip()

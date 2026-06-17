@@ -173,6 +173,7 @@ app.add_middleware(LatencyMiddleware)
 
 # CORS middleware
 _default_origins = [
+    "https://ionetra-frontend-688398835360.asia-south1.run.app",
     "https://ionetra-frontend-snh4yqlhmq-el.a.run.app",
     "https://3io-netra.vercel.app",
     "http://localhost:3000",

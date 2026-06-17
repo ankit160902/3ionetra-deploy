@@ -44,8 +44,8 @@ steps:
       - 'asia-south1-docker.pkg.dev/ionetra/ionetra-docker/frontend:${_TAG}'
 
 substitutions:
-  _TAG: 'v3.2'
-  _API_URL: 'https://ionetra-backend-snh4yqlhmq-el.a.run.app'
+  _TAG: 'v3.3'
+  _API_URL: 'https://ionetra-backend-688398835360.asia-south1.run.app'
 
 images:
   - 'asia-south1-docker.pkg.dev/ionetra/ionetra-docker/frontend:${_TAG}'

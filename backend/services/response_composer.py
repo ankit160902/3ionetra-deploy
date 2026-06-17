@@ -2,6 +2,7 @@
 Response Composer - Single authority for response generation
 """
 import hashlib
+from datetime import date
 from typing import List, Dict, Optional
 import logging
 import numpy as np
@@ -91,7 +92,7 @@ class ResponseComposer:
         phase_val = phase.value if phase else "unknown"
         key_str = (
             f"{query.strip().lower()}|{phase_val}|{emotion}|{life_domain}"
-            f"|turn{turn_count}|u{user_fingerprint}|fmt=md1"
+            f"|turn{turn_count}|u{user_fingerprint}|fmt=md1|d={date.today().isoformat()}"
         )
         return hashlib.md5(key_str.encode()).hexdigest()
 

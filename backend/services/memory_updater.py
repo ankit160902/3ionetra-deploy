@@ -188,6 +188,20 @@ def update_memory(memory: ConversationMemory, session: SessionState, text: str) 
         session.add_signal(SignalType.INTENT, "Temple & Pilgrimage", 0.8)
         memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.35)
 
+    # Planetary / astrological signals — clear dharmic context, high readiness
+    planetary_keywords = [
+        "shani", "saturn", "rahu", "ketu", "mangal", "guru", "brihaspati",
+        "budh", "shukra", "surya", "chandra", "graha", "gochara",
+        "nakshatra", "rashi", "kundali", "lagna", "dasha", "antardasha",
+        "mahadasha", "sadesati", "sade sati", "dhrishti", "jyotish",
+        "planetary", "vedic astrology", "kundli", "janma",
+    ]
+    if _has_word(planetary_keywords, text):
+        session.add_signal(SignalType.INTENT, "Planetary Guidance", 0.9)
+        if "Planetary Guidance" not in turn_topics:
+            turn_topics.append("Planetary Guidance")
+        memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.60)
+
     breathing_keywords = ["breath", "breathing", "pranayama", "inhale", "exhale", "lungs", "air"]
     if _has_word(breathing_keywords, text):
         session.add_signal(SignalType.INTENT, "Pranayama (Breathwork)", 0.8)
@@ -249,6 +263,9 @@ def update_memory(memory: ConversationMemory, session: SessionState, text: str) 
     if memory.story.emotional_state:
         memory.record_emotion(session.turn_count, memory.story.emotional_state, "moderate")
         memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.15)
+        # Cumulative boost: second+ emotional turn signals sustained context → ready for dharmic guidance
+        if session.turn_count >= 2:
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.20)
 
     if len(text) > 100:
         memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.2)

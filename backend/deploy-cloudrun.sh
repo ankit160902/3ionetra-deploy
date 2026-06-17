@@ -86,8 +86,8 @@ info "Project: $PROJECT_ID  Region: $REGION  Service: $SERVICE_NAME  Image: $IMA
 if [ "$SKIP_BUILD" = false ]; then
   info "Building backend image with Cloud Build (this can take 8-15 minutes)..."
   gcloud builds submit \
-    --tag "$IMAGE" \
-    --timeout=20m \
+    --config=cloudbuild.yaml \
+    --substitutions="_TAG=${TAG}" \
     .
   info "Image pushed: $IMAGE"
 else

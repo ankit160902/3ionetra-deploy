@@ -81,9 +81,9 @@ import json
 from pymongo import MongoClient
 from datetime import datetime, timezone
 
-# MongoDB Connection
-MONGO_URI = "mongodb+srv://ankit:ozHqxvsmsM5MLFpq@cluster0.zmoledd.mongodb.net/"
-DB_NAME = "spiritual_voice_bot"
+# MongoDB Connection (read from environment — never hardcode credentials)
+MONGO_URI = os.environ["MONGO_URI"]
+DB_NAME = os.environ.get("DATABASE_NAME", "spiritual_voice_bot")
 
 def get_db():
     import time

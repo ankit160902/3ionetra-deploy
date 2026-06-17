@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 # Ceiling per expected_length category
 CEILING_MAP = {
     "brief": 512,       # greetings, closures, acknowledgments
-    "moderate": 1536,   # emotional shares, simple questions — raised to prevent mid-sentence truncation
-    "detailed": 2048,   # guidance, how-to, explanations
-    "full_text": 4096,  # chalisa, stotra, complete prayers, step-by-step
+    "moderate": 2048,   # emotional shares, simple questions, mantra + meaning
+    "detailed": 4096,   # guidance, how-to, itineraries, explanations
+    "full_text": 8192,  # chalisa, stotra, complete prayers, step-by-step
 }
 
 # Intents that should never be budget-starved
@@ -30,7 +30,7 @@ _MIN_BUDGET_INTENTS = frozenset({
 })
 
 # Default ceiling when no expected_length is provided
-DEFAULT_CEILING = 1024
+DEFAULT_CEILING = CEILING_MAP["moderate"]
 
 
 @dataclass
@@ -75,13 +75,13 @@ def calculate_budget(
     # Primary: use LLM's length estimate
     ceiling = CEILING_MAP.get(expected_length, DEFAULT_CEILING)
 
-    # Cap long responses in guidance phase — conversational guidance should be concise
-    # Reserve high ceilings only when user explicitly asks for complete prayer/chalisa text
+    # Cap long responses in guidance phase — conversational guidance should be concise.
+    # full_text is NOT capped: when expected_length="full_text" the intent classifier
+    # already identified an explicit full-prayer/stotra request (chalisa, tandav, etc.).
+    # Devanagari text tokenises at 2-3 tokens/char, so 8192 ceiling is needed.
     if phase == ConversationPhase.GUIDANCE:
-        if expected_length == "full_text":
+        if expected_length == "detailed":
             ceiling = min(ceiling, 2048)
-        elif expected_length == "detailed":
-            ceiling = min(ceiling, 1536)
 
     # Safety floor: explicit requests should never be budget-starved
     if intent in _MIN_BUDGET_INTENTS:

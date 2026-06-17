@@ -356,7 +356,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
         <div data-testid="auth-form" className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl rounded-[2rem] shadow-2xl shadow-orange-900/5 dark:shadow-black/20 p-7 md:p-8 border border-orange-100/50 dark:border-gray-800">
           <h2 data-testid="auth-heading" className="text-base font-black text-gray-900 dark:text-gray-100 mb-1 text-center uppercase tracking-widest opacity-80">
             {isRegisterMode
-              ? (registrationStep === 1 ? 'Create Account' : registrationStep === 2 ? 'Complete Profile' : 'Spiritual Profile')
+              ? (registrationStep === 1 ? 'Know Your Bhakt' : registrationStep === 2 ? 'Complete Profile' : 'Spiritual Profile')
               : 'Welcome Back'}
           </h2>
           {isRegisterMode && registrationStep > 1 && (
@@ -603,7 +603,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                 {isLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : isRegisterMode ? (
-                  registrationStep < 3 ? 'Next Step' : 'Create Account'
+                  registrationStep < 3 ? 'Next Step' : 'Know Your Bhakt'
                 ) : (
                   'Sign In'
                 )}
@@ -629,7 +629,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                 onClick={switchMode}
                 className="ml-2 text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 transition-colors underline underline-offset-4"
               >
-                {isRegisterMode ? 'Sign In' : 'Create Account'}
+                {isRegisterMode ? 'Sign In' : 'Know Your Bhakt'}
               </button>
             </p>
           </div>

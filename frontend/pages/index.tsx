@@ -816,6 +816,7 @@ export default function Home() {
                   <h1 className="text-xl font-black flex items-center gap-2 tracking-tighter">
                     <img src="/logo-circle.jpg" alt="3ioNetra" className="w-8 h-8 rounded-full shadow-sm" />
                     <span className="text-[#1a2b56] dark:text-white">3ioNetra</span>
+                    <span className="text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400 rounded-full border border-orange-200 dark:border-orange-700 leading-none">BETA</span>
                   </h1>
                 </div>
               </div>

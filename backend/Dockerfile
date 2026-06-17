@@ -47,11 +47,14 @@ from skyfield.api import Loader; \
 from skyfield.data import hipparcos; \
 jl = Loader(os.path.expanduser('~/.local/share/jyotishganit')); \
 jl('de421.bsp'); \
-print('de421.bsp cached to jyotishganit dir'); \
+jl.timescale(); \
+print('de421.bsp + timescale cached to jyotishganit dir'); \
 al = Loader('/app'); \
 al('de421.bsp'); \
 al.open(hipparcos.URL); \
-print('hip_main.dat + de421.bsp cached to /app')"
+print('hip_main.dat + de421.bsp cached to /app'); \
+assert os.path.exists(os.path.expanduser('~/.local/share/jyotishganit/de421.bsp')), 'FATAL: de421.bsp missing'; \
+print('VERIFIED: all skyfield data present')"
 
 # Force offline mode for runtime
 ENV TRANSFORMERS_OFFLINE=1

@@ -6,8 +6,9 @@ pydantic-settings
 pymongo
 motor>=3.3.0
 
-# LLM
-google-genai==1.61.0
+# LLM (AWS Bedrock — Claude via Converse API)
+boto3>=1.34
+google-genai==1.61.0  # retained for deferred eval/ingestion scripts only; not used by the running service
 gunicorn==21.2.0
 
 # Embeddings (REQUIRED runtime deps)

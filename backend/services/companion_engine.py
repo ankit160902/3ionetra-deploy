@@ -402,6 +402,14 @@ class CompanionEngine:
         # is_direct_ask preserved for downstream use (acknowledgement selection)
         is_direct_ask = is_ready and readiness_trigger in ("explicit_request", "user_asked_for_guidance")
 
+        # MODE OVERRIDE for GUIDANCE phase: presence_first and exploratory both suppress dharmic
+        # content in different ways — presence_first forbids mantras/verses entirely, exploratory
+        # asks another clarifying question instead of giving guidance. When FSM decides GUIDANCE
+        # is appropriate, both modes are wrong. Override to teaching so the full dharmic toolkit
+        # (mantras, verses, remedies, profile-aware practices) is available.
+        if is_ready and analysis.get("response_mode") in ("presence_first", "exploratory"):
+            analysis["response_mode"] = "teaching"
+
         # ------------------------------------------------------------------
         # Ready for wisdom → prepare acknowledgement + context docs + products
         # ------------------------------------------------------------------
@@ -420,16 +428,17 @@ class CompanionEngine:
                     "I see what you are seeking. Let me look that up for you."
                 ]
 
-            # 🛍️ PRODUCT RECOMMENDATION (kicked off in parallel with the
-            # context-doc work below). The recommender reads only intent +
-            # turn_topics + life_domain — none of which depend on the RAG
-            # context that's about to be computed. Running both in parallel
-            # cuts ~2-3s off slow-path latency. The recommender catches its
-            # own exceptions and returns [] on failure, so awaiting the task
-            # at the end is safe.
-            product_task = asyncio.create_task(
-                self.product_recommender.recommend(session, message, analysis)
-            )
+            # PRODUCT RECOMMENDATIONS — DISABLED
+            # # 🛍️ PRODUCT RECOMMENDATION (kicked off in parallel with the
+            # # context-doc work below). The recommender reads only intent +
+            # # turn_topics + life_domain — none of which depend on the RAG
+            # # context that's about to be computed. Running both in parallel
+            # # cuts ~2-3s off slow-path latency. The recommender catches its
+            # # own exceptions and returns [] on failure, so awaiting the task
+            # # at the end is safe.
+            # product_task = asyncio.create_task(
+            #     self.product_recommender.recommend(session, message, analysis)
+            # )
 
             # 📚 SCRIPTURE RETRIEVAL — mode-gated, sequential (post-Apr-2026).
             context_docs = []
@@ -464,9 +473,11 @@ class CompanionEngine:
                 except Exception as e:
                     logger.warning(f"Guidance-phase RAG/validation failed: {e}")
 
-            # Now await the product recommendation that's been running in
-            # parallel with the RAG/validation work above.
-            products = await product_task
+            # PRODUCT RECOMMENDATIONS — DISABLED
+            # # Now await the product recommendation that's been running in
+            # # parallel with the RAG/validation work above.
+            # products = await product_task
+            products = []
 
             # Model routing decision
             routing = self.model_router.route(
@@ -546,8 +557,10 @@ class CompanionEngine:
         if past_memories:
             user_profile["past_memories"] = past_memories
 
-        # 🛍️ PRODUCT RECOMMENDATION (listening phase — delegated to ProductRecommender)
-        products = await self.product_recommender.recommend(session, message, analysis)
+        # PRODUCT RECOMMENDATIONS — DISABLED
+        # # 🛍️ PRODUCT RECOMMENDATION (listening phase — delegated to ProductRecommender)
+        # products = await self.product_recommender.recommend(session, message, analysis)
+        products = []
 
         # Model routing decision
         routing = self.model_router.route(

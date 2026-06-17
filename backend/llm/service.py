@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from config import settings
 from services.resilience import CircuitBreaker
 from services.language_detector import get_language_constraint
-from google.genai import types as genai_types
+from llm.bedrock import bedrock_generate, bedrock_stream, get_bedrock_runtime
 from models.session import ConversationPhase
 
 
@@ -305,6 +305,23 @@ def clean_response(text: str) -> str:
     for i, block in enumerate(_dh_blocks):
         text = text.replace(f'\x00DH{i}\x00', block)
 
+    # Step 6: Dedup [MANTRA] blocks — remove Roman transliteration if Devanagari
+    # version already present (prevents two cards for the same mantra)
+    _mantra_blocks = list(re.finditer(r'\[MANTRA\](.*?)\[/MANTRA\]', text, re.DOTALL))
+    if len(_mantra_blocks) >= 2:
+        _seen_norm = set()
+        _to_remove = []
+        for _m in _mantra_blocks:
+            # Normalize: strip Devanagari chars, lowercase, collapse whitespace
+            _norm = re.sub(r'[ऀ-ॿ]', '', _m.group(1)).lower().strip()
+            _norm = re.sub(r'\s+', ' ', _norm)
+            if _norm in _seen_norm and _norm:
+                _to_remove.append((_m.start(), _m.end()))
+            else:
+                _seen_norm.add(_norm)
+        for _start, _end in reversed(_to_remove):
+            text = text[:_start].rstrip() + text[_end:]
+
     return text
 
 
@@ -324,15 +341,14 @@ def is_closure_signal(text: str) -> bool:
 
 
 # --------------------------------------------------
-# Gemini Integration
+# Bedrock Integration
 # --------------------------------------------------
 
 try:
-    from google import genai
-    GEMINI_AVAILABLE = True
+    import boto3  # noqa: F401
+    BEDROCK_AVAILABLE = True
 except ImportError:
-    genai = None
-    GEMINI_AVAILABLE = False
+    BEDROCK_AVAILABLE = False
 
 
 # --------------------------------------------------
@@ -346,7 +362,7 @@ class LLMService:
     """
     
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or settings.GEMINI_API_KEY
+        self.api_key = api_key or settings.GEMINI_API_KEY  # unused under Bedrock (IAM auth)
         self.available = False
         self.client = None
         self.last_usage = {"input_tokens": 0, "output_tokens": 0}
@@ -363,37 +379,28 @@ class LLMService:
         # to reduce token count (~3000 → ~1300) for faster Gemini responses
         self._compact_system_instruction = self._build_compact_instruction(self.system_instruction)
 
-        # Initialize Circuit Breaker for Gemini API
+        # Initialize Circuit Breaker for Bedrock API
         self.circuit_breaker = CircuitBreaker(
-            name="GeminiAPI",
+            name="BedrockAPI",
             failure_threshold=settings.CIRCUIT_BREAKER_THRESHOLD,
             recovery_timeout=settings.CIRCUIT_BREAKER_TIMEOUT
         )
-        # Semaphore to cap concurrent Gemini API calls
+        # Semaphore to cap concurrent Bedrock API calls
         self._gemini_sem = asyncio.Semaphore(settings.GEMINI_MAX_CONCURRENT)
 
-        if not GEMINI_AVAILABLE:
-            logger.warning("Gemini SDK not available")
-            return
-
-        if not self.api_key:
-            logger.warning("Gemini API key not provided")
+        if not BEDROCK_AVAILABLE:
+            logger.warning("boto3 not available — Bedrock LLM disabled")
             return
 
         try:
-            from google import genai
-
-            self.client = genai.Client(
-                api_key=self.api_key,
-                http_options={"timeout": 60000},  # 60s — allows SDK retries when Gemini returns 503
-            )
+            self.client = get_bedrock_runtime()
             self.available = True
-            self._gemini_caches = {}  # {cache_key: cache_name}
-            logger.info("✅ LLM Service initialized with Gemini (8s timeout)")
+            self._gemini_caches = {}  # retained (dormant) — no Bedrock context cache
+            logger.info(f"✅ LLM Service initialized with Bedrock (region={settings.BEDROCK_REGION})")
 
         except Exception:
             self.available = False
-            logger.exception("❌ Failed to initialize Gemini")
+            logger.exception("❌ Failed to initialize Bedrock runtime")
 
     def prewarm_caches(self) -> None:
         """Pre-warm Gemini context caches at startup.
@@ -460,23 +467,10 @@ class LLMService:
         return self._create_cache_sync(model, system_instruction, cache_key)
 
     def _create_cache_sync(self, model: str, system_instruction: str, cache_key: str) -> Optional[str]:
-        """Synchronous cache creation — only used during startup pre-warm."""
-        try:
-            from google.genai import types
-            cache = self.client.caches.create(
-                model=model,
-                config=types.CreateCachedContentConfig(
-                    system_instruction=system_instruction,
-                    ttl=f"{settings.GEMINI_CACHE_TTL}s",
-                ),
-            )
-            expires_at = _time.monotonic() + settings.GEMINI_CACHE_TTL - _CACHE_REFRESH_BUFFER
-            self._gemini_caches[cache_key] = (cache.name, expires_at)
-            logger.info(f"Gemini cache created: {cache_key} → {cache.name}")
-            return cache.name
-        except Exception as e:
-            logger.warning(f"Gemini cache creation failed: {e}")
-            return None
+        """No-op under Bedrock — Converse has no Gemini-style explicit context
+        cache. Retained as a dormant stub (GEMINI_CACHE_TTL defaults to 0, so
+        this is never reached). System instruction is sent inline each call."""
+        return None
 
     def _schedule_background_cache(self, model: str, system_instruction: str, phase_key: str, cache_key: str):
         """Schedule cache creation in background thread — doesn't block the request."""
@@ -522,21 +516,14 @@ class LLMService:
         """
 
         try:
-            from google.genai import types
-
             async def _do_ocr():
                 def _sync():
-                    return self.client.models.generate_content(
+                    return bedrock_generate(
+                        prompt,
                         model=settings.GEMINI_MODEL,
-                        contents=[
-                            types.Content(
-                                role="user",
-                                parts=[
-                                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                                    types.Part.from_text(text=prompt)
-                                ]
-                            )
-                        ]
+                        temperature=0.0,
+                        max_tokens=2048,
+                        images=[(image_bytes, mime_type)],
                     )
                 return await asyncio.to_thread(_sync)
 
@@ -557,22 +544,13 @@ class LLMService:
         if not self.available:
             return ""
 
-        logger.info(f"Analyzing video via Gemini: {video_path}")
-        
+        logger.info(f"Analyzing video via Bedrock (Nova): {video_path}")
+
         try:
-            from google.genai import types
-            # 1. Upload the file to Gemini Files API
-            # Note: SDK v2 handles file uploads differently
-            file_ref = self.client.files.upload(path=video_path)
-            
-            # Wait for file to be processed (standard for Files API)
-            while file_ref.state == "PROCESSING":
-                await asyncio.sleep(2)
-                file_ref = self.client.files.get(name=file_ref.name)
-            
-            if file_ref.state == "FAILED":
-                logger.error(f"Video processing failed in Gemini Files API: {file_ref.name}")
-                return ""
+            import os as _os
+            with open(video_path, "rb") as _vf:
+                video_bytes = _vf.read()
+            video_fmt = (_os.path.splitext(video_path)[1].lstrip(".") or "mp4").lower()
 
             prompt = """
             You are a specialized spiritual companion (Mitra). Your task is to analyze this spiritual video with extreme precision.
@@ -604,29 +582,21 @@ class LLMService:
 
             async def _do_video():
                 def _sync():
-                    return self.client.models.generate_content(
-                        model=settings.GEMINI_MODEL,
-                        contents=[
-                            file_ref,
-                            prompt
-                        ],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json"
-                        )
+                    return bedrock_generate(
+                        prompt,
+                        model=settings.BEDROCK_VIDEO_MODEL,
+                        temperature=0.0,
+                        max_tokens=4096,
+                        json_mode=True,
+                        video=(video_bytes, video_fmt),
                     )
                 return await asyncio.to_thread(_sync)
 
             async with self._gemini_sem:
                 response = await self.circuit_breaker.call(_do_video)
 
-            # Optionally delete file from Files API after processing
-            try:
-                self.client.files.delete(name=file_ref.name)
-            except Exception as delete_err:
-                logger.warning(f"Could not delete video from Files API: {delete_err}")
-
             return response.text if response.text else "{}"
-            
+
         except Exception as e:
             logger.error(f"Video analysis failed: {e}")
             return ""
@@ -719,62 +689,25 @@ class LLMService:
     # _PHASE_MAX_TOKENS removed — token budgets are now solely managed by model_router.py
 
     def _build_gen_config(self, config_override: Optional[Dict] = None) -> Dict:
-        """Build the Gemini generation config dict.
+        """Resolve generation parameters into a Bedrock-shaped dict.
 
-        Token budget (max_output_tokens) comes from model_router via config_override.
-        This method does NOT override it — model_router is the single authority.
-        Fallback uses TokenBudgetCalculator default (moderate=1024), NOT a hardcoded value.
+        Returns ``{system, temperature, max_tokens, model}`` consumed by the
+        bedrock helper. Token budget (max_tokens) comes from model_router via
+        config_override; this method does not override it. Gemini-only concepts
+        (safety_settings, AFC, thinking_config, context cache) are dropped —
+        Claude needs none of them.
         """
-        from services.token_budget import CEILING_MAP, DEFAULT_CEILING
-        gen_config = config_override.copy() if config_override else {
-            "temperature": settings.RESPONSE_TEMPERATURE,
-            "max_output_tokens": DEFAULT_CEILING,  # Adaptive default, not hardcoded
-            "safety_settings": [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
-            ],
-        }
-        phase = gen_config.pop("_phase", None)
-        model = gen_config.pop("_model", settings.GEMINI_MODEL)
-        # Caller may pin a specific thinking budget (e.g. internal callers
-        # like the retrieval judge that genuinely benefit from reasoning).
-        # If absent, fall through to the global default in config.py.
-        thinking_budget_override = gen_config.pop("_thinking_budget", None)
-        sys_instruction = self._get_system_instruction(phase)
-        phase_key = "listening" if phase in (ConversationPhase.LISTENING, ConversationPhase.CLARIFICATION) else "full"
+        from services.token_budget import DEFAULT_CEILING
+        cfg = dict(config_override or {})
+        phase = cfg.pop("_phase", None)
+        model = cfg.pop("_model", settings.GEMINI_MODEL)
+        cfg.pop("_thinking_budget", None)  # no-op under Bedrock/Claude
 
-        # Disable AFC unconditionally — adds latency and we never use it.
-        gen_config.pop("thinking_config", None)
-        gen_config["automatic_function_calling"] = genai_types.AutomaticFunctionCallingConfig(disable=True)
-
-        # Thinking-mode policy.
-        #
-        # Gemini 2.5/3 models default to thinking ON, which (a) adds 5-15s of
-        # latency and (b) can leak chain-of-thought scratchpad into responses
-        # if the SDK part filtering misses a frame (we observed this in live
-        # E2E testing — see plan file C1). The default budget therefore comes
-        # from settings.LLM_THINKING_BUDGET_DEFAULT (default 0 = off) so the
-        # main conversational path never has scratchpad to leak. Internal
-        # callers that need reasoning can opt in via the ``_thinking_budget``
-        # gen_config kwarg.
-        budget = (
-            thinking_budget_override
-            if thinking_budget_override is not None
-            else settings.LLM_THINKING_BUDGET_DEFAULT
-        )
-        # Only set thinking_config on models that actually support it.
-        # gemini-2.5/3 family supports it; gemini-2.0-flash does not.
-        if budget > 0 and ("2.5" in model or "3-" in model or "3." in model):
-            gen_config["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=budget)
-
-        cache_name = self._get_or_create_cache(model, sys_instruction, phase_key)
-        if cache_name:
-            gen_config["cached_content"] = cache_name
-        else:
-            gen_config["system_instruction"] = sys_instruction
-        return gen_config
+        temperature = cfg.get("temperature", settings.RESPONSE_TEMPERATURE)
+        # accept either key name; model_router passes max_output_tokens
+        max_tokens = cfg.get("max_output_tokens", cfg.get("max_tokens", DEFAULT_CEILING))
+        system = self._get_system_instruction(phase)
+        return {"system": system, "temperature": temperature, "max_tokens": max_tokens, "model": model}
 
     # --------------------------------------------------
     # Prompt Building
@@ -1641,16 +1574,18 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                     )
 
             _cfg = dict(effective_config or {}); _cfg["_phase"] = phase; _cfg["_model"] = active_model
-            gen_config = self._build_gen_config(_cfg or None)
+            gen = self._build_gen_config(_cfg or None)
 
-            # Generate response from Gemini with streaming via Circuit Breaker
+            # Generate response from Bedrock with streaming via Circuit Breaker
 
             async def _do_stream_call():
                 def _sync():
-                    return self.client.models.generate_content_stream(
+                    return bedrock_stream(
+                        prompt,
                         model=active_model,
-                        contents=prompt,
-                        config=gen_config,
+                        system=gen["system"],
+                        temperature=gen["temperature"],
+                        max_tokens=gen["max_tokens"],
                     )
                 return await asyncio.to_thread(_sync)
 
@@ -1663,8 +1598,8 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                 def _read_stream():
                     try:
                         for chunk in stream:
-                            if chunk.text:
-                                loop.call_soon_threadsafe(queue.put_nowait, chunk.text)
+                            if chunk:
+                                loop.call_soon_threadsafe(queue.put_nowait, chunk)
                     finally:
                         loop.call_soon_threadsafe(queue.put_nowait, None)
 
@@ -1707,17 +1642,12 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
 
         async def _do_json():
             def _sync_call():
-                return self.client.models.generate_content(
+                return bedrock_generate(
+                    prompt,
                     model=target_model,
-                    contents=prompt,
-                    config={
-                        "temperature": temperature,
-                        "response_mime_type": "application/json",
-                        "max_output_tokens": max_output_tokens,
-                        "automatic_function_calling": __import__(
-                            "google.genai", fromlist=["types"]
-                        ).types.AutomaticFunctionCallingConfig(disable=True),
-                    },
+                    temperature=temperature,
+                    max_tokens=max_output_tokens,
+                    json_mode=True,
                 )
             return await asyncio.to_thread(_sync_call)
 
@@ -1811,16 +1741,18 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                     )
 
             _cfg = dict(effective_config or {}); _cfg["_phase"] = phase; _cfg["_model"] = active_model
-            gen_config = self._build_gen_config(_cfg or None)
+            gen = self._build_gen_config(_cfg or None)
 
-            # Generate response from Gemini via Circuit Breaker
+            # Generate response from Bedrock via Circuit Breaker
 
             async def _do_call():
                 def _sync():
-                    return self.client.models.generate_content(
+                    return bedrock_generate(
+                        prompt,
                         model=active_model,
-                        contents=prompt,
-                        config=gen_config,
+                        system=gen["system"],
+                        temperature=gen["temperature"],
+                        max_tokens=gen["max_tokens"],
                     )
                 return await asyncio.to_thread(_sync)
 
@@ -1836,22 +1768,8 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
             ]
 
             if not response:
-                logger.error("No response object from Gemini")
+                logger.error("No response object from Bedrock")
                 return random.choice(fallbacks)
-
-            # --- Diagnostic logging ---
-            try:
-                candidates = response.candidates
-                if candidates:
-                    candidate = candidates[0]
-                    logger.info(f"Gemini finish_reason: {candidate.finish_reason}")
-                    if hasattr(candidate, 'safety_ratings') and candidate.safety_ratings:
-                        for rating in candidate.safety_ratings:
-                            logger.info(f"Safety rating: {rating.category} = {rating.probability}")
-                if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                    logger.warning(f"Prompt feedback: {response.prompt_feedback}")
-            except Exception as diag_err:
-                logger.warning(f"Could not inspect response metadata: {diag_err}")
 
             # Track token usage for cost tracking
             try:
@@ -1863,25 +1781,10 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
             except Exception:
                 self.last_usage = {"input_tokens": 0, "output_tokens": 0}
 
-            # Extract text — handle thinking-enabled models where .text may be empty
-            try:
-                response_text = response.text
-            except Exception:
-                response_text = None
-
-            # Fallback: extract text parts from candidates (thinking-enabled responses)
-            if not response_text and response.candidates:
-                try:
-                    parts = response.candidates[0].content.parts
-                    text_parts = [p.text for p in parts if hasattr(p, 'text') and not getattr(p, 'thought', False)]
-                    if text_parts:
-                        response_text = "".join(text_parts)
-                        logger.info(f"Extracted text from {len(text_parts)} candidate parts")
-                except Exception as e:
-                    logger.error(f"Could not extract from candidates: {e}")
+            response_text = response.text
 
             if not response_text:
-                logger.warning("Empty text response from Gemini (possibly safety blocked)")
+                logger.warning("Empty text response from Bedrock")
                 return random.choice(fallbacks)
 
             cleaned_response = clean_response(response_text)
@@ -1898,20 +1801,15 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
             return random.choice(fallbacks)
 
     async def generate_quick_response(self, prompt: str) -> str:
-        """Quick generation using gemini-2.0-flash for internal tasks (grounding, summaries).
-        Uses the lightweight model — no thinking overhead, ~1s vs ~4s."""
+        """Quick generation for internal tasks (grounding, summaries).
+        Uses settings.GEMINI_FAST_MODEL (Haiku) — low latency."""
         try:
-            from google.genai import types as _gentypes
-
             def _sync():
-                return self.client.models.generate_content(
-                    model="gemini-2.0-flash",
-                    contents=prompt,
-                    config={
-                        "temperature": 0.1,
-                        "max_output_tokens": 256,
-                        "automatic_function_calling": _gentypes.AutomaticFunctionCallingConfig(disable=True),
-                    },
+                return bedrock_generate(
+                    prompt,
+                    model=settings.GEMINI_FAST_MODEL,
+                    temperature=0.1,
+                    max_tokens=256,
                 )
             response = await asyncio.to_thread(_sync)
             return response.text.strip() if response.text else ""

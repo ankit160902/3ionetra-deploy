@@ -6,6 +6,7 @@
 node_modules/
 .next/
 out/
+package-lock.json
 
 # Tests / Playwright artifacts
 test-results/

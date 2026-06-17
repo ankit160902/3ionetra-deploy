@@ -50,6 +50,15 @@ EXPLICIT_TOPICS = frozenset({"Verse Request", "Product Inquiry"})
 # Topics treated as guidance asks (need min turns)
 GUIDANCE_TOPICS = frozenset({"Routine Request", "Puja Guidance", "Diet Plan"})
 
+# Planetary / astrological keywords — unambiguous dharmic context, high readiness
+PLANETARY_KEYWORDS = frozenset({
+    "shani", "saturn", "rahu", "ketu", "mangal", "guru", "brihaspati",
+    "budh", "shukra", "surya", "chandra", "graha", "gochara",
+    "nakshatra", "rashi", "kundali", "lagna", "dasha", "antardasha",
+    "mahadasha", "sadesati", "sade sati", "dhrishti", "jyotish",
+    "planetary", "vedic astrology", "kundli", "janma",
+})
+
 
 class ConversationFSM:
     """Conversation phase state machine.
@@ -91,16 +100,26 @@ class ConversationFSM:
             conditions=["is_closure_intent"],
             before="set_trigger_closure",
         )
-        # 1b. Return to LISTENING after guidance — the default post-guidance path.
-        # After a guidance turn, the companion must listen before offering more
-        # wisdom. This transition fires unconditionally (except for closure) so
-        # the oscillation cooldown and listening-first guards can function.
+        # 1b. Return to LISTENING after guidance — only when the user genuinely
+        # needs a listening turn (acute new emotion without dharmic context).
+        # When the user continues with dharmic signals (graha, verse request,
+        # puja, etc.) the companion stays in GUIDANCE. This enables the
+        # "stay-dharmic" mode where guidance is the default after turn 2.
         self.machine.add_transition(
             trigger="step",
             source="GUIDANCE",
             dest="LISTENING",
+            conditions=["needs_re_listening"],
             unless=["is_closure_intent"],
             before="set_trigger_back_to_listening",
+        )
+        # 1c. Stay in GUIDANCE when user continues with dharmic or spiritual context.
+        self.machine.add_transition(
+            trigger="step",
+            source="GUIDANCE",
+            dest=None,  # internal transition — no state change
+            unless=["is_closure_intent", "needs_re_listening"],
+            before="set_trigger_guidance_continue",
         )
         # 2a. Explicit user-initiated request (panchang, product, verse — bypasses all gates)
         # These represent unambiguous user signals where the user has explicitly named
@@ -307,6 +326,8 @@ class ConversationFSM:
             "chant", "suggest a practice", "spiritual help", "koi upay",
             "mantra batao", "kuch batao", "what should i chant",
             "give me a mantra", "suggest me", "guide me spiritually",
+            # Planetary / astrological signals — unambiguous dharmic context
+            *PLANETARY_KEYWORDS,
         ]
         guidance_phrases = [
             "what should i do", "what can i do", "how do i fix",
@@ -319,7 +340,7 @@ class ConversationFSM:
         elif any(phrase in msg_lower for phrase in guidance_phrases):
             min_turns = 4 if requires_extra else 3
         else:
-            min_turns = 5 if requires_extra else 3
+            min_turns = 3 if requires_extra else 2
 
         return self.session.turn_count >= min_turns
 
@@ -347,7 +368,38 @@ class ConversationFSM:
         return False
 
     def readiness_threshold_met(self, event=None) -> bool:
-        return self.session.memory.readiness_for_wisdom >= 0.7
+        return self.session.memory.readiness_for_wisdom >= 0.50
+
+    def needs_re_listening(self, event=None) -> bool:
+        """True only when the user genuinely needs a listening response after guidance.
+
+        After turn 2, the companion defaults to staying in GUIDANCE unless
+        the user opens with an acute new emotional crisis that has no dharmic
+        context. Dharmic signals (planetary, verse, puja, guidance ask) always
+        keep the companion in GUIDANCE regardless of emotional intensity.
+        """
+        # Very early turns always need listening
+        if self.session.turn_count < 2:
+            return True
+
+        # Any dharmic signal → stay in GUIDANCE, never re-listen
+        has_dharmic_signal = (
+            self._analysis.get("needs_direct_answer", False)
+            or self._analysis.get("intent") in (
+                IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO,
+                IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH,
+            )
+            or any(t in EXPLICIT_TOPICS | GUIDANCE_TOPICS for t in self._turn_topics)
+            or any(kw in self._last_message for kw in PLANETARY_KEYWORDS)
+            or "Planetary Guidance" in self._turn_topics
+        )
+        if has_dharmic_signal:
+            return False
+
+        # Re-listen only for acute new emotional crisis without dharmic context
+        urgency = (self._analysis.get("urgency") or "").lower()
+        emotion = (self._analysis.get("emotion") or "").lower()
+        return urgency == "crisis" or emotion in ("grief", "despair")
 
     def should_force_transition(self, event=None) -> bool:
         return self.session.should_force_transition()
@@ -376,3 +428,6 @@ class ConversationFSM:
 
     def set_trigger_back_to_listening(self, event=None):
         self._trigger_reason = "post_guidance_listening"
+
+    def set_trigger_guidance_continue(self, event=None):
+        self._trigger_reason = "guidance_continue"

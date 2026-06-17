@@ -244,13 +244,18 @@ class SessionState:
 
     def should_force_transition(self) -> bool:
         """Check if we should force transition to answering phase"""
-        # If we recently gave guidance, DO NOT force transition. 
+        from config import settings
+        # Always read live config value — session.max_clarification_turns may be stale
+        # for sessions restored from Redis that were created before a config change.
+        _force_at = settings.MAX_CLARIFICATION_TURNS
+
+        # If we recently gave guidance, DO NOT force transition.
         # We need at least 2 turns of listening between wisdom.
         if self.last_guidance_turn > 0 and (self.turn_count - self.last_guidance_turn) < 2:
             return False
 
         # Force transition after max turns (absolute cap)
-        if self.turn_count >= self.max_clarification_turns:
+        if self.turn_count >= _force_at:
             # If we haven't given guidance for a while, allow it
             if self.last_guidance_turn == -1 or (self.turn_count - self.last_guidance_turn) > 3:
                 return True

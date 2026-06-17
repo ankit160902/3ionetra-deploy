@@ -378,20 +378,19 @@ class IntentAgent:
         prompt = self.INTENT_PROMPT.format(message=message, context=context_summary)
 
         try:
-            # Use fast model for classification (gemini-2.0-flash: ~1s vs 2.5-pro: ~7s)
+            # Use fast model (Haiku) for low-latency JSON classification
+            from llm.bedrock import bedrock_generate
+
             def _sync_call():
-                return self.llm.client.models.generate_content(
+                return bedrock_generate(
+                    prompt,
                     model=settings.GEMINI_FAST_MODEL,
-                    contents=prompt,
-                    config={
-                        "temperature": settings.INTENT_TEMPERATURE,
-                        "response_mime_type": "application/json",
-                        "max_output_tokens": 1024,
-                        "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True),
-                    }
+                    temperature=settings.INTENT_TEMPERATURE,
+                    max_tokens=1024,
+                    json_mode=True,
                 )
 
-            # Run in thread pool — no timeout, let Gemini complete
+            # Run in thread pool — let Bedrock complete
             response_text = await asyncio.to_thread(_sync_call)
 
             raw_text = response_text.text.strip()

@@ -73,7 +73,13 @@ class PanchangService:
             return False
         try:
             if self._ts is None:
-                self._ts = get_timescale()
+                try:
+                    self._ts = get_timescale()
+                except Exception as e:
+                    # VPC egress blocks finals2000A.all download — use builtin leap-second table
+                    logger.warning(f"Timescale download failed ({e}), falling back to builtin")
+                    from skyfield.api import load as _sf_load
+                    self._ts = _sf_load.timescale(builtin=True)
             if self._eph is None:
                 self._eph = get_ephemeris()
             return True

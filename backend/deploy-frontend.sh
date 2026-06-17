@@ -76,8 +76,8 @@ info "Project: $PROJECT_ID  Region: $REGION  Service: $SERVICE_NAME  Image: $IMA
 if [ "$SKIP_BUILD" = false ]; then
   info "Building frontend image with Cloud Build (this can take 3-5 minutes)..."
   ( cd "$FRONTEND_DIR" && gcloud builds submit \
-    --tag "$IMAGE" \
-    --timeout=10m \
+    --config=cloudbuild.yaml \
+    --substitutions="_TAG=${TAG},_API_URL=https://ionetra-backend-688398835360.asia-south1.run.app" \
     . )
   info "Image pushed: $IMAGE"
 else
